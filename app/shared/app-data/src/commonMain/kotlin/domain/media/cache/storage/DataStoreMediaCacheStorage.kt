@@ -32,6 +32,7 @@ import kotlinx.datetime.Clock
 import kotlinx.serialization.SerializationException
 import me.him188.ani.app.data.persistent.DataStoreJson
 import me.him188.ani.app.domain.media.cache.MediaCache
+import me.him188.ani.app.domain.media.cache.isFinished
 import me.him188.ani.app.domain.media.cache.engine.InvalidMediaCacheEngineKey
 import me.him188.ani.app.domain.media.cache.engine.MediaCacheEngine
 import me.him188.ani.app.domain.media.cache.engine.MediaStats
@@ -293,10 +294,26 @@ private class MediaCacheStorageSource(
 
     override suspend fun fetch(query: MediaFetchRequest): SizedSource<MediaMatch> {
         return SinglePagePagedSource {
-            storage.listFlow.first().mapNotNull { cache ->
+            val caches = storage.listFlow.first()
+            val matchingCaches = caches.mapNotNull { cache ->
                 val kind = query.matches(cache.metadata)
                 if (kind == null) null
-                else MediaMatch(cache.getCachedMedia(), kind)
+                else cache to kind
+            }
+            
+            // 优先返回已完成的缓存
+            val completedCaches = matchingCaches.filter { (cache, _) ->
+                cache.isFinished()
+            }
+            
+            val resultCaches = if (completedCaches.isNotEmpty()) {
+                completedCaches
+            } else {
+                matchingCaches
+            }
+            
+            resultCaches.map { (cache, kind) ->
+                MediaMatch(cache.getCachedMedia(), kind)
             }.asFlow()
         }
     }

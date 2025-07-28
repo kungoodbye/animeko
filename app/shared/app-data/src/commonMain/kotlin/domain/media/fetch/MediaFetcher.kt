@@ -49,6 +49,7 @@ import me.him188.ani.app.data.repository.RepositoryRateLimitedException
 import me.him188.ani.app.data.repository.RepositoryServiceUnavailableException
 import me.him188.ani.app.data.repository.RepositoryUnknownException
 import me.him188.ani.app.domain.mediasource.instance.MediaSourceInstance
+import me.him188.ani.app.domain.media.cache.MediaCacheManager
 import me.him188.ani.app.platform.currentAniBuildConfig
 import me.him188.ani.datasources.api.Media
 import me.him188.ani.datasources.api.paging.SizedSource
@@ -363,10 +364,41 @@ class MediaSourceMediaFetcher(
             if (mediaSourceResults.isEmpty()) {
                 return@run flowOfEmptyList()
             }
-            combine(mediaSourceResults.map { it.results }) { lists ->
-                lists.asSequence().flatten().toList()
+            
+            // 分离本地缓存源和网络源
+            val localSources = mediaSourceResults.filter { it.kind == MediaSourceKind.LocalCache }
+            val networkSources = mediaSourceResults.filter { it.kind != MediaSourceKind.LocalCache }
+            
+            // 优先处理本地缓存源
+            val localResults = if (localSources.isNotEmpty()) {
+                combine(localSources.map { it.results }) { lists ->
+                    lists.asSequence().flatten().toList()
+                }
+            } else {
+                flowOfEmptyList()
+            }
+            
+            // 网络源结果
+            val networkResults = if (networkSources.isNotEmpty()) {
+                combine(networkSources.map { it.results }) { lists ->
+                    lists.asSequence().flatten().toList()
+                }
+            } else {
+                flowOfEmptyList()
+            }
+            
+            // 优先返回本地缓存结果，如果有的话
+            combine(localResults, networkResults) { local, network ->
+                val allResults = local + network
+                allResults.distinctBy { it.mediaId }
             }.map { list ->
-                list.distinctBy { it.mediaId } // distinct globally by id, just to be safe
+                // 如果本地缓存有结果，优先返回本地缓存
+                val localMedia = list.filter { it.mediaSourceId == MediaCacheManager.LOCAL_FS_MEDIA_SOURCE_ID }
+                if (localMedia.isNotEmpty()) {
+                    localMedia
+                } else {
+                    list
+                }
             }.flowOn(flowContext)
                 .run {
                     if (currentAniBuildConfig.isDebug && ENABLE_WATCHDOG) {

@@ -50,6 +50,7 @@ import me.him188.ani.datasources.api.source.MediaSource
 import me.him188.ani.datasources.api.source.MediaSourceConfig
 import me.him188.ani.datasources.api.source.MediaSourceFactory
 import me.him188.ani.datasources.api.source.MediaSourceInfo
+import me.him188.ani.datasources.api.source.MediaSourceKind
 import me.him188.ani.datasources.api.source.serializeArguments
 import me.him188.ani.datasources.ikaros.IkarosMediaSource
 import me.him188.ani.datasources.jellyfin.EmbyMediaSource
@@ -235,7 +236,12 @@ class MediaSourceManagerImpl(
     override val allInstances =
         combine(instances.flow, proxyProvider.proxy.distinctUntilChanged()) { saves, config ->
             // 一定要 additionalSources 在前面, local sources 需要优先使用
-            this.additionalSources + saves.mapNotNull { createInstance(it, config) }
+            // 确保本地缓存源在列表前面，获得更高优先级
+            val localSources = this.additionalSources.filter { it.source.kind == MediaSourceKind.LocalCache }
+            val otherSources = this.additionalSources.filter { it.source.kind != MediaSourceKind.LocalCache }
+            val networkSources = saves.mapNotNull { createInstance(it, config) }
+            
+            localSources + otherSources + networkSources
         }.onReplacement { list ->
             list.forEach { it.close() }
         }.flowOn(flowCoroutineContext).shareIn(scope, replay = 1, started = SharingStarted.Lazily)

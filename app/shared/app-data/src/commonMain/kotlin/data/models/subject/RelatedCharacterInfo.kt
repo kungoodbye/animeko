@@ -12,8 +12,11 @@ package me.him188.ani.app.data.models.subject
 import androidx.collection.mutableIntObjectMapOf
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
+import me.him188.ani.app.data.models.subject.CharacterRole.Companion.EXTRA
 import me.him188.ani.app.data.models.subject.CharacterRole.Companion.GUEST
 import me.him188.ani.app.data.models.subject.CharacterRole.Companion.MAIN
+import me.him188.ani.app.data.models.subject.CharacterRole.Companion.NARRATOR
+import me.him188.ani.app.data.models.subject.CharacterRole.Companion.OTHER
 import me.him188.ani.app.data.models.subject.CharacterRole.Companion.SUPPORTING
 import kotlin.jvm.JvmInline
 
@@ -74,6 +77,21 @@ value class CharacterRole(
          * 客串
          */
         val GUEST = CharacterRole(3)
+
+        /**
+         * 路人/群众演员
+         */
+        val EXTRA = CharacterRole(4)
+
+        /**
+         * 旁白/解说
+         */
+        val NARRATOR = CharacterRole(5)
+
+        /**
+         * 其他/未知角色类型
+         */
+        val OTHER = CharacterRole(-1)
     }
 }
 
@@ -82,6 +100,9 @@ private val names by lazy(LazyThreadSafetyMode.PUBLICATION) {
         put(MAIN.id, "主角")
         put(SUPPORTING.id, "配角")
         put(GUEST.id, "客串")
+        put(EXTRA.id, "路人")
+        put(NARRATOR.id, "旁白")
+        put(OTHER.id, "其他")
     }
 }
 

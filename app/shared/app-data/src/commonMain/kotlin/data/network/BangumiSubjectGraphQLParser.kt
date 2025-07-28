@@ -38,6 +38,8 @@ import me.him188.ani.datasources.api.EpisodeSort
 import me.him188.ani.datasources.api.EpisodeType
 import me.him188.ani.datasources.api.PackedDate
 import me.him188.ani.utils.serialization.BigNum
+import me.him188.ani.utils.logging.logger
+import me.him188.ani.utils.logging.warn
 import me.him188.ani.utils.serialization.getBooleanOrFail
 import me.him188.ani.utils.serialization.getIntOrFail
 import me.him188.ani.utils.serialization.getOrFail
@@ -78,11 +80,19 @@ object BangumiSubjectGraphQLParser {
             val characters = element.getOrFail("characters").jsonArray.mapIndexed { index, relatedCharacter ->
                 check(relatedCharacter is JsonObject)
 
-                val role = when (relatedCharacter.getIntOrFail("type")) {
+                val role = when (val type = relatedCharacter.getIntOrFail("type")) {
                     1 -> CharacterRole.MAIN
                     2 -> CharacterRole.SUPPORTING
                     3 -> CharacterRole.GUEST
-                    else -> throw IllegalStateException("Unexpected character type: $relatedCharacter")
+                    4 -> CharacterRole.EXTRA
+                    5 -> CharacterRole.NARRATOR
+                    else -> {
+                        // 对于未知的角色类型，记录日志但不抛出异常，使用OTHER类型
+                        logger<BangumiSubjectGraphQLParser>().warn {
+                            "Unknown character type: $type for character: $relatedCharacter"
+                        }
+                        CharacterRole.OTHER
+                    }
                 }
 
                 val character = relatedCharacter.getOrFail("character").jsonObject
@@ -142,11 +152,19 @@ object BangumiSubjectGraphQLParser {
         val characters = getOrFail("characters").jsonArray.mapIndexed { _, relatedCharacter ->
             check(relatedCharacter is JsonObject)
 
-            val role = when (relatedCharacter.getIntOrFail("type")) {
+            val role = when (val type = relatedCharacter.getIntOrFail("type")) {
                 1 -> CharacterRole.MAIN
                 2 -> CharacterRole.SUPPORTING
                 3 -> CharacterRole.GUEST
-                else -> throw IllegalStateException("Unexpected character type: $relatedCharacter")
+                4 -> CharacterRole.EXTRA
+                5 -> CharacterRole.NARRATOR
+                else -> {
+                    // 对于未知的角色类型，记录日志但不抛出异常，使用OTHER类型
+                    logger<BangumiSubjectGraphQLParser>().warn {
+                        "Unknown character type: $type for character: $relatedCharacter"
+                    }
+                    CharacterRole.OTHER
+                }
             }
 
             val character = relatedCharacter.getOrFail("character").jsonObject

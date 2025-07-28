@@ -29,6 +29,7 @@ import me.him188.ani.app.domain.media.selector.MediaSelector
 import me.him188.ani.app.domain.player.VideoLoadingState
 import me.him188.ani.datasources.api.Media
 import me.him188.ani.datasources.api.source.MediaSourceKind
+import me.him188.ani.datasources.api.topic.ResourceLocation
 import me.him188.ani.utils.logging.error
 import me.him188.ani.utils.logging.info
 import me.him188.ani.utils.logging.logger
@@ -112,6 +113,26 @@ class PlayerSession(
                     e,
                 )
             }
+            
+            // 检查是否是本地文件，如果是本地文件且网络错误，不应该阻止播放
+            val isLocalFile = media.download is ResourceLocation.LocalFile
+            val isNetworkError = e.reason == ResolutionFailures.NETWORK_ERROR
+            
+            if (isLocalFile && isNetworkError) {
+                logger.info { "Network error for local file, attempting to play local file directly" }
+                // 对于本地文件，网络错误不应该阻止播放，尝试直接播放本地文件
+                try {
+                    val localSource = mediaResolver.resolve(media, episodeInfo)
+                    val data = localSource.open(scopeForCleanup = backgroundScope)
+                    player.setMediaData(data)
+                    _videoLoadingStateFlow.value = VideoLoadingState.Succeed(isBt = localSource is TorrentMediaDataProvider)
+                    return@coroutineScope
+                } catch (localError: Exception) {
+                    logger.warn { "Failed to play local file directly: $localError" }
+                    // 如果本地文件播放也失败，则返回原始错误
+                }
+            }
+            
             _videoLoadingStateFlow.value = when (e.reason) {
                 ResolutionFailures.FETCH_TIMEOUT -> VideoLoadingState.ResolutionTimedOut
                 ResolutionFailures.ENGINE_ERROR -> VideoLoadingState.UnknownError(e)
