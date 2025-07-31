@@ -45,11 +45,12 @@ class CacheGroupState(
 
     val latestCreationTime = episodes.asSequence().mapNotNull { it.creationTime }.maxOfOrNull { it }
 
-    private val allEpisodesFinished = run {
+    val allEpisodesFinished = run {
         episodes.all { it.isFinished }
     }
     val downloadSpeedText = computeSpeedText(
-        speed = if (allEpisodesFinished) FileSize.Companion.Unspecified else stats.downloadSpeed,
+        // 即使所有集数都已完成，也显示下载速度
+        speed = stats.downloadSpeed,
         size = stats.downloadedSize,
     )
 

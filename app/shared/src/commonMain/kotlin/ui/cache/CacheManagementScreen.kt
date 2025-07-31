@@ -46,6 +46,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.transformLatest
@@ -66,6 +67,7 @@ import me.him188.ani.app.ui.cache.components.CacheGroupCard
 import me.him188.ani.app.ui.cache.components.CacheGroupCommonInfo
 import me.him188.ani.app.ui.cache.components.CacheGroupState
 import me.him188.ani.app.ui.cache.components.CacheManagementOverallStats
+import me.him188.ani.app.ui.cache.components.CollapsibleCacheGroupCard
 import me.him188.ani.app.ui.cache.components.TestCacheGroupSates
 import me.him188.ani.app.ui.cache.components.createTestMediaStats
 import me.him188.ani.app.ui.foundation.AbstractViewModel
@@ -92,6 +94,7 @@ import org.jetbrains.compose.ui.tooling.preview.Preview
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 import kotlin.time.Duration.Companion.seconds
+import me.him188.ani.datasources.api.topic.FileSize.Companion.bytes
 
 // 为了未来万一要改, 方便
 typealias CacheGroupGridLayoutState = LazyStaggeredGridState
@@ -137,33 +140,57 @@ class CacheManagementViewModel : AbstractViewModel(), KoinComponent {
 
     private fun createCacheGroupStates(allCaches: List<MediaCache>): Flow<List<CacheGroupState>> {
         val groupStateFlows = allCaches
-            .groupBy { it.origin.unwrapCached().mediaId }
-            .map { (_, mediaCaches) ->
+            .groupBy { cache -> 
+                // 按照剧集名称分组，优先使用subjectNameCN，如果为空则使用第一个subjectName或originalTitle
+                cache.metadata.subjectNameCN 
+                    ?: cache.metadata.subjectNames.firstOrNull()
+                    ?: cache.origin.originalTitle
+            }
+            .map { (subjectName, mediaCaches) ->
                 check(mediaCaches.isNotEmpty())
 
                 val firstCache = mediaCaches.first()
 
-                val groupId = firstCache.origin.unwrapCached().mediaId
-                val statsFlow = firstCache.sessionStats
-                    .combine(
-                        firstCache.sessionStats.map { it.downloadedBytes.inBytes }.averageRate(),
-                    ) { stats, downloadSpeed ->
+                // 使用剧集名称作为groupId
+                val groupId = subjectName
+                val statsFlow = combine(mediaCaches.map { it.sessionStats }) { statsArray ->
+                    // 合并所有缓存项的统计数据
+                    val combinedDownloadedBytes = statsArray.fold(FileSize.Companion.Zero) { acc, stats -> 
+                        acc + stats.downloadedBytes 
+                    }
+                    val combinedUploadSpeed = statsArray.fold(FileSize.Companion.Zero) { acc, stats -> 
+                        acc + stats.uploadSpeed 
+                    }
+                    
+                    // 计算所有缓存项的下载速度总和
+                    var totalDownloadSpeed = FileSize.Companion.Zero
+                    for (stats in statsArray) {
+                        // 使用sessionStats中的downloadSpeed
+                        println("DEBUG: sessionStats.downloadSpeed: ${stats.downloadSpeed}, isUnspecified: ${stats.downloadSpeed == FileSize.Companion.Unspecified}")
+                        if (stats.downloadSpeed != FileSize.Companion.Unspecified) {
+                            totalDownloadSpeed = totalDownloadSpeed + stats.downloadSpeed
+                            println("DEBUG: 单个下载速度(直接): ${stats.downloadSpeed}, 累计: $totalDownloadSpeed")
+                        }
+                    }
+                    
+                    println("DEBUG: 最终合并下载速度(直接): $totalDownloadSpeed")
+                    
+                    CacheGroupState.Stats(
+                        downloadSpeed = totalDownloadSpeed,
+                        downloadedSize = combinedDownloadedBytes,
+                        uploadSpeed = combinedUploadSpeed,
+                    )
+                }
+                .sampleWithInitial(1.seconds)
+                .onStart {
+                    emit(
                         CacheGroupState.Stats(
-                            downloadSpeed = downloadSpeed.bytes,
-                            downloadedSize = stats.downloadedBytes,
-                            uploadSpeed = stats.uploadSpeed,
-                        )
-                    }
-                    .sampleWithInitial(1.seconds)
-                    .onStart {
-                        emit(
-                            CacheGroupState.Stats(
-                                FileSize.Unspecified,
-                                FileSize.Unspecified,
-                                FileSize.Unspecified,
-                            ),
-                        )
-                    }
+                            FileSize.Unspecified,
+                            FileSize.Unspecified,
+                            FileSize.Unspecified,
+                        ),
+                    )
+                }
 
                 val commonInfoFlow =
                     subjectCollectionRepository.subjectCollectionFlow(firstCache.metadata.subjectIdInt) // 既会查缓存, 也会查网络, 基本上不会有查不到的情况
@@ -181,9 +208,7 @@ class CacheManagementViewModel : AbstractViewModel(), KoinComponent {
                                 createGroupCommonInfo(
                                     subjectId = firstCache.metadata.subjectIdInt,
                                     firstCache = firstCache,
-                                    subjectDisplayName = firstCache.metadata.subjectNameCN
-                                        ?: firstCache.metadata.subjectNames.firstOrNull()
-                                        ?: firstCache.origin.originalTitle,
+                                    subjectDisplayName = subjectName,
                                     imageUrl = null,
                                 ),
                             )
@@ -242,10 +267,10 @@ class CacheManagementViewModel : AbstractViewModel(), KoinComponent {
         val statsFlow = mediaCache.fileStats
             .combine(
                 mediaCache.fileStats
-                    .shareInBackground(replay = 1).map { it.downloadedBytes.inBytes }.averageRate(),
+                    .shareInBackground(replay = 1).map { it.downloadedBytes.inBytes }.averageRate().map { it.bytes },
             ) { stats, downloadSpeed ->
                 CacheEpisodeState.Stats(
-                    downloadSpeed = downloadSpeed.bytes,
+                    downloadSpeed = downloadSpeed,
                     progress = stats.downloadProgress,
                     totalSize = stats.totalSize,
                 )
@@ -444,7 +469,7 @@ fun CacheManagementScreen(
                 }
 
                 items(state.groups, key = { it.id }) { group ->
-                    CacheGroupCard(
+                    CollapsibleCacheGroupCard(
                         group,
                         onPlay,
                         onResume,
